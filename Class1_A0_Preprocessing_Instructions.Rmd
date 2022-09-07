@@ -266,6 +266,5 @@ final_data <- final_data %>%
   mutate(Diagnosis = str_replace_all(Diagnosis, 'A', 'ASD')) %>% 
   mutate(Diagnosis = str_replace_all(Diagnosis, 'B', 'TD'))
 
-
 ```
 

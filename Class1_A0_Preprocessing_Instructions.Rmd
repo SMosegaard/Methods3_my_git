@@ -259,12 +259,16 @@ final_data <- final_data %>%
 
 
 final_data <- final_data %>% 
-  mutate(Gender = str_replace_all(Gender, '1', 'Female')) %>% 
-  mutate(Gender = str_replace_all(Gender, '2', 'Male'))
+  mutate(Gender = str_replace_all(Gender, '1', 'Male')) %>% 
+  mutate(Gender = str_replace_all(Gender, '2', 'Female'))
 
 final_data <- final_data %>% 
   mutate(Diagnosis = str_replace_all(Diagnosis, 'A', 'ASD')) %>% 
   mutate(Diagnosis = str_replace_all(Diagnosis, 'B', 'TD'))
+```
 
+
+```{r}
+write.csv(final_data, file='final_data_class1.csv')
 ```
 

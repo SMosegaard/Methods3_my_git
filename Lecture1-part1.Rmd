@@ -83,6 +83,7 @@ The output of the above function tells us that we need to specify a prior for th
 This output also provides suggestions for priors (e.g., student_t(3, -0.2, 2.5) for the Intercept) based on the data, but let's ignore those for now ( - as we want to set them ourselves)
 
 Let's start by specifying weakly informative Gaussian priors for the intercept and sigma, centered at 0 with a standard deviation of 10. These priors allow for a large range of values for the intercept and residual variation (e.g. with this prior, we are specifying that we expect 95 % of the distribution to be between -20 and 20 (which is 2xSD)). 
+
 The tails of these distributions thus represent very large (and unrealistic) values for our parameters of interest - but let's see where these weakly informative priors take us.
 
 ```{r}

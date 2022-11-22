@@ -14,12 +14,6 @@ pacman::p_load(msm, tidyverse, brms, grid, gridExtra, readxl, metafor, dplyr, ma
 
 ```
 
-#load data
-```{r}
-data <- read_csv("Ass3_empiricalData1.csv")
-```
-
-
 The Machine Learning assignment has 3 main parts: First we create a skeptical and an informed simulation, based on the meta-analysis. Second we build and test our machine learning pipeline on the simulated data. Second we apply the pipeline to the empirical data.
 
 The report for the exam, thus, consists of the answer to all the following prompts:
@@ -87,8 +81,8 @@ d_informed_wide <- d_informed %>%
               values_from = measurement)
 
 d_informed_wide <- d_informed_wide %>% 
-  mutate(ID = as.character(ID)) %>% 
-  mutate(Trial = as.character(Trial))
+  mutate(ID = as.factor(ID)) %>% 
+  mutate(Trial = as.factor(Trial))
 
 ```
 
@@ -122,6 +116,10 @@ d_skeptic_wide <- d_skeptic %>%
   mutate(TrueEffect= NULL) %>% 
   pivot_wider(names_from = Variable,
               values_from = measurement)
+
+d_skeptic_wide <- d_skeptic_wide %>%
+    mutate(ID = as.factor(ID)) %>%
+    mutate(Trial = as.factor(Trial))
 ```
 
 
@@ -141,10 +139,17 @@ train_informed <- d_informed_wide %>%
 test_informed <- d_informed_wide %>% 
   subset(ID %in% TestID)
 
+train_skeptic <- d_skeptic_wide %>% 
+  subset(!(ID %in% TestID))
+test_skeptic <- d_skeptic_wide %>% 
+  subset((ID %in% TestID))
+
 ```
 
 # ii) pre-process the data (e.g. scaling the features)
 ```{r}
+
+#informed
 
 scaled_informed <- train_informed %>% 
   recipe(Group ~ .) %>% #define the outcome
@@ -152,55 +157,96 @@ scaled_informed <- train_informed %>%
   step_center(all_numeric()) %>% #centers all the numeric values
   prep(training = train_informed, retain = TRUE)
 
-scaled_test_informed <- test_informed %>% 
-  recipe(Group ~ .) %>% #define the outcome
-  step_scale(all_numeric()) %>% #scales all the numeric values
-  step_center(all_numeric()) %>% #centers all the numeric values
-  prep(training = test_informed, retain = TRUE)
   
 #creating new scaled dataframes
 train_informed_scaled <- juice(scaled_informed) 
-test_informed_scaled <- juice(scaled_test_informed)
+test_informed_scaled <- bake(scaled_informed, new_data = test_informed)
 
+
+#skeptic
+scaled_skeptic <- train_skeptic %>% 
+  recipe(Group ~ .) %>% #define the outcome
+  step_scale(all_numeric()) %>% #scales all the numeric values
+  step_center(all_numeric()) %>% #centers all the numeric values
+  prep(training = train_skeptic, retain = TRUE)
+
+#creating new scaled dataframes
+train_skeptic_scaled <- juice(scaled_skeptic)
+test_skeptic_scaled <- bake(scaled_skeptic, new_data = test_skeptic)
 ```
 
 #iii) fit and assess a classification algorithm on the training data (e.g. Bayesian multilevel logistic regression)
 ```{r}
-#create formula
+#create formula for informed
 f1 <- bf(Group ~ 1 + v1 + v2 + v3 + v4 + v5 +v6 +v7 +v8 +v9 +v10)
+
+#create formula for skeptic
+s_f1 <- bf(Group ~ 1 + v1 + v2 + v3 + v4 + v5 +v6 +v7 +v8 +v9 +v10)
 
 ```
 #get prios
 ```{r}
+#informed
 get_prior(f1, 
           train_informed_scaled, 
           family = bernoulli)
+
+#skeptic
+get_prior(s_f1, 
+    train_skeptic_scaled,
+    family = bernoulli)
 ```
 
 #setting priors
 ```{r}
+#informed
 f1_prior <- c(
   prior(normal(0, 1), class = Intercept),
   prior(normal(0, 0.3), class = b) 
   )
 
+#skeptic
+s_f1_prior <- c(
+prior(normal(0, 1), class = Intercept),
+prior(normal(0, 0.3), class = b) 
+)
 ```
 
 ### Make model
 ```{r}
+#informed
 fitted_f1_prior <- brm(
     f1,
     train_informed_scaled,
     family = bernoulli,
     prior = f1_prior,
     sample_prior = T,
-    iter = 2000, 
-    warmup = 1000,
-    cores = 2,
+    iter = 4000, 
+    warmup = 2000,
+    cores = 4,
     backend ="cmdstanr",
     threads = threading(2),
     refresh=0,
-    chains = 2,
+    chains = 4,
+    control = list(
+      adapt_delta = 0.999,
+      max_treedepth = 20))
+
+#skeptic
+fitted_s_f1_prior <- 
+  brm(
+    s_f1,
+    train_skeptic_scaled,
+    family = bernoulli,
+    prior = s_f1_prior,
+    sample_prior = T,
+    iter = 4000, 
+    warmup = 2000,
+    cores = 4,
+    backend ="cmdstanr",
+    threads = threading(2),
+    refresh=0,
+    chains = 4,
     control = list(
       adapt_delta = 0.999,
       max_treedepth = 20))
@@ -209,17 +255,26 @@ fitted_f1_prior <- brm(
 
 #look at pp-check
 ```{r}
+#informed
 pp_check(fitted_f1_prior, ndraws = 100)
+
+#skeptic
+pp_check(fitted_s_f1_prior, ndraws = 100)
 ```
 
 # Parameter recovery
 ```{r}
+#informed
 print(fitted_f1_prior)
+
+#skeptic
+print(fitted_s_f1_prior)
 ```
 
 #Prior posterier update checks
 ```{r}
 
+#informed
 variables(fitted_f1_prior)
 Posterior_f1 <- as_draws_df(fitted_f1_prior)
 
@@ -231,21 +286,32 @@ ggplot(Posterior_f1) +
   ggtitle("intercept for study effect size")+
       theme(plot.title = element_text(size = 10, face = "bold"))
 
+#skeptic
+variables(fitted_s_f1_prior)
+Posterior_s_f1 <- as_draws_df(fitted_s_f1_prior)
+
+ggplot(Posterior_s_f1) +
+  geom_density(aes(prior_Intercept), fill="chartreuse2", color="black",alpha=0.6) +
+  geom_density(aes(b_Intercept), fill="deeppink", color="black",alpha=0.6) + 
+  xlab('Intercept') +
+  theme_classic()+
+  ggtitle("intercept for study effect size")+
+      theme(plot.title = element_text(size = 10, face = "bold"))
+
+
 #green = prior
 #pink = simulated data 
 ```
   
 iv) assess performance on the test set; 
-
 ```{r}
-
 PerformanceProb <- tibble(expand_grid(
     Sample = seq(4000),
-    Model = c("our model"),
-    Setup = c("informed", "skeptic"),
-    Type = c("training", "test"))
+    Setup= c("informed", "skeptic"),
+    Type= c("training", "test"))
     )
 
+# informed
 test_informed_scaled$PredictionsPerc0 <- predict(fitted_f1_prior, newdata = test_informed_scaled, allow_new_levels = T)[,1]
 test_informed_scaled$Predictions0[test_informed_scaled$PredictionsPerc0 > 0.5] <- "Schizophrenia" 
 test_informed_scaled$Predictions0[test_informed_scaled$PredictionsPerc0 <= 0.5] <- "Control" 
@@ -254,14 +320,35 @@ train_informed_scaled$PredictionsPerc0 <- predict(fitted_f1_prior)[,1]
 train_informed_scaled$Predictions0[train_informed_scaled$PredictionsPerc0 > 0.5] <- "Schizophrenia" 
 train_informed_scaled$Predictions0[train_informed_scaled$PredictionsPerc0 <= 0.5] <- "Control" 
 
+# skeptic
+test_skeptic_scaled$PredictionsPerc1 <- predict(fitted_s_f1_prior, newdata = test_skeptic_scaled, allow_new_levels = T)[,1]
+test_skeptic_scaled$Predictions1[test_skeptic_scaled$PredictionsPerc1 > 0.5] <- "Schizophrenia" 
+test_skeptic_scaled$Predictions1[test_skeptic_scaled$PredictionsPerc1 <= 0.5] <- "Control" 
+
+train_skeptic_scaled$PredictionsPerc1 <- predict(fitted_s_f1_prior)[,1]
+train_skeptic_scaled$Predictions1[train_skeptic_scaled$PredictionsPerc1 > 0.5] <- "Schizophrenia" 
+train_skeptic_scaled$Predictions1[train_skeptic_scaled$PredictionsPerc1 <= 0.5] <- "Control" 
+
+
+# informed 
 train0 <- inv_logit_scaled(posterior_linpred(fitted_f1_prior, 
-                                             summary = F))
-
+    summary = F))
+    
 test0 <- inv_logit_scaled(posterior_linpred(fitted_f1_prior, 
-                                            summary = F, 
-                                            newdata = test_informed_scaled, 
-                                            allow_new_levels = T ))
+    summary = F, 
+    newdata = test_informed_scaled, 
+    allow_new_levels = T ))
+    
+# skeptic
+train1 <- inv_logit_scaled(posterior_linpred(fitted_s_f1_prior, 
+    summary = F))
+    
+test1 <- inv_logit_scaled(posterior_linpred(fitted_s_f1_prior, 
+    summary = F, 
+    newdata = test_skeptic_scaled, 
+    allow_new_levels = T ))
 
+# informed
 test_informed_scaled <- test_informed_scaled %>% 
   mutate(Group = as.factor(Group),
          Predictions0 = as.factor((Predictions0)))
@@ -270,18 +357,40 @@ train_informed_scaled <- train_informed_scaled %>%
   mutate(Group = as.factor(Group),
          Predictions0 = as.factor((Predictions0)))
 
+# skeptic
+test_skeptic_scaled <- test_skeptic_scaled %>% 
+  mutate(Group = as.factor(Group),
+         Predictions1 = as.factor(Predictions1))
+
+train_skeptic_scaled <- train_skeptic_scaled %>% 
+  mutate(Group = as.factor(Group),
+         Predictions1 = as.factor(Predictions1))
+
+
+
+# obs the following for-loop does not work:
 
 for (i in seq(4000)){
 
-    train_informed_scaled$Predictions0 <- as.factor(ifelse(train0[i,] >0.5, "Schizophrenia", "Control"))
-    test_informed_scaled$Predictions0 <- as.factor(ifelse(test0[i,] >0.5, "Schizophrenia", "Control"))
+    train_informed_scaled$Predictions0 <- as.factor(ifelse(train0[i,] > 0.5, "Schizophrenia", "Control"))
     
-    PerformanceProb$Accuracy[PerformanceProb$Sample == i & PerformanceProb$Model == "Our_model" & PerformanceProb$Setup == "informed" & PerformanceProb$Type =="training"] <- 
-      accuracy(train_informed_scaled, truth = Group, estimate = Predictions0)[, ".estimate"]
+    test_informed_scaled$Predictions0 <- as.factor(ifelse(test0[i,] > 0.5, "Schizophrenia", "Control"))
+
+    PerformanceProb$Accuracy[PerformanceProb$Sample==i & PerformanceProb$Setup == "informed" & PerformanceProb$Type =="training"] <- 
+    accuracy(train_informed_scaled, truth = Group, estimate = Predictions0)[, ".estimate"]
+    
+    PerformanceProb$Accuracy[PerformanceProb$Sample==i & PerformanceProb$Setup == "informed" & PerformanceProb$Type =="test"] <- 
+    accuracy(test_informed_scaled, truth = Group, estimate = Predictions0)[, ".estimate"]
+    
+    train_skeptic_scaled$Predictions1 <- as.factor(ifelse(train1[i,] > 0.5, "Schizophrenia", "Control"))
+    test_skeptic_scaled$Predictions1 <- as.factor(ifelse(test1[i,] > 0.5, "Schizophrenia", "Control"))
+  
+    PerformanceProb$Accuracy[PerformanceProb$Sample == i & PerformanceProb$Setup == "skeptic" & PerformanceProb$Type =="training"] <- 
+    accuracy(train_skeptic_scaled, truth = Group, estimate = Predictions1)[, ".estimate"]
     
     
-    PerformanceProb$Accuracy[PerformanceProb$Sample == i & PerformanceProb$Model == "Our_model" & PerformanceProb$Setup == "informed" & PerformanceProb$Type =="test"] <- 
-      accuracy(train_informed_scaled, truth = Group, estimate = Predictions0)[, ".estimate"]    
+    PerformanceProb$Accuracy[PerformanceProb$Sample == i & PerformanceProb$Setup == "skeptic" & PerformanceProb$Type =="test"] <- 
+    accuracy(test_skeptic_scaled, truth = Group, estimate = Predictions1)[, ".estimate"]
 }
 
 ```
@@ -294,13 +403,25 @@ conf_mat(
   estimate = Predictions0,
   dnn = c("Predictions", "Truth")
 )
-```
 
-```{r}
 metrics(test_informed_scaled,
         truth = Group, estimate = Predictions0) %>% 
   knitr::kable()
 ```
+
+```{r}
+#Plotting the accuracy
+
+ggplot(PerformanceProb) +
+  geom_point(aes(x = Setup, y = as.numeric(Accuracy), colour = Type)) + geom_abline(intercept = 0.5, slope = 0, col=c("Purple"), linetype = c("dashed")) +
+  theme_minimal() +
+  ylab("Accuracy") +
+  xlab("Type") + 
+  theme_minimal() +
+  ggtitle("Accuracy between informed and sceptic")
+
+```
+
 
 v) discuss whether performance is as expected and feature importance is as expected.
 
@@ -309,9 +430,81 @@ v) discuss whether performance is as expected and feature importance is as expec
 
 Download the empirical dataset from brightspace and apply your ML pipeline to the new data, adjusting where needed. Warning: in the simulated dataset we only had 10 features, now you have many more! Such is the life of the ML practitioner. Consider the impact a higher number of features will have on your ML inference, and decide whether you need to cut down the number of features before running the pipeline (or alternatively expand the pipeline to add feature selection).
 
+#load data
+```{r}
+data <- read_csv("Ass3_empiricalData1.csv")
+```
+
+#Making the formula
+```{r}
+pacman::p_load(DALEX, DALEXtra, kernlab, randomForest, xgboost, knitr, dotwhisker)
+
+d_inf <- train_informed_scaled %>%
+        mutate(ID = NULL, Trial = NULL, Preds = NULL, Predictions = NULL, v1_s = NULL)
+        
+LogisticRegression_inf <- logistic_reg() %>%
+        set_mode("classification") %>%
+        set_engine("glm") %>%
+        fit(Group ~., data=d_inf)
+
+explainer_lm <- explain_tidymodels(
+        LogisticRegression_inf,
+        data = train_informed_scaled,
+        y = as.numeric(train_informed_scaled$Group) -1,
+        label = "logReg",
+        verbose = FALSE)
+
+explainer_lm %>% 
+        model_parts() %>%
+        plot(show_boxplots = FALSE) +
+        ggtitle("Feature Importance", "")
+
+explainer_rf <- explain_tidymodels(
+        RandomForest_inf,
+        data = train_informed_scaled,
+        y = as.numeric(train_informed_scaled$Group) -1,
+        label = "random forest",
+        verbose = FALSE)
+
+explainer_rf %>% 
+        model_parts() %>%
+        plot(show_boxplots = FALSE) +
+        ggtitle("Feature Importance", "")
+```
+
+#Get prior
 ```{r}
 
 ```
+
+#Set priors
+```{r}
+
+```
+
+#Building model
+```{r}
+```
+
+
+```{r}
+#Prior predictive checks
+```
+
+
+```{r}
+#Fit the model
+```
+
+```{r}
+#Posterior predictive checks
+```
+
+
+```{r}
+#Prior posterior update checks 
+```
+
 
 
 
